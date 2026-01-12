@@ -1,0 +1,278 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Modelo de Usuario
+model User {
+  id          String    @id @default(uuid())
+  email       String    @unique
+  password    String
+  name        String
+  role        UserRole  @default(USER)
+  departmentId String?
+  branchId    String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  department      Department? @relation("DepartmentUsers", fields: [departmentId], references: [id])
+  branch          Branch?     @relation("BranchUsers", fields: [branchId], references: [id])
+  createdTickets  Ticket[]    @relation("TicketCreator")
+  assignedTickets Ticket[]       @relation("TicketAssignee")
+  comments        Comment[]
+  processedRequests UserRequest[] @relation("ProcessedRequests")
+  notifications   Notification[]
+  systemLogs      SystemLog[]
+  ticketHistory   TicketHistory[] @relation("TicketHistoryChangedBy")
+  uploadedAttachments Attachment[] @relation("AttachmentUploader")
+  
+  @@map("users")
+}
+
+// Modelo de Solicitud de Registro
+model UserRequest {
+  id            String           @id @default(uuid())
+  name          String
+  email         String           @unique
+  password      String           // Hash de la contraseña
+  requestedRole UserRole
+  departmentId  String?
+  branchId      String?
+  status        RequestStatus    @default(PENDING)
+  rejectionReason String?
+  processedById String?          // Admin que aprobó/rechazó
+  processedAt   DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  
+  department    Department?      @relation("RequestDepartments", fields: [departmentId], references: [id])
+  branch        Branch?          @relation("RequestBranches", fields: [branchId], references: [id])
+  processedBy   User?            @relation("ProcessedRequests", fields: [processedById], references: [id])
+  
+  @@map("user_requests")
+}
+
+// Modelo de Sucursal
+model Branch {
+  id          String    @id @default(uuid())
+  code        String    @unique
+  name        String
+  address     String
+  city        String
+  state       String
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  users       User[]          @relation("BranchUsers")
+  tickets     Ticket[]
+  departments Department[]    @relation("BranchDepartments")
+  userRequests UserRequest[]  @relation("RequestBranches")
+  
+  @@map("branches")
+}
+
+// Modelo de Departamento
+model Department {
+  id          String    @id @default(uuid())
+  name        String
+  code        String
+  description String?
+  branchId    String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  branch      Branch?   @relation("BranchDepartments", fields: [branchId], references: [id])
+  users       User[]         @relation("DepartmentUsers")
+  tickets     Ticket[]
+  userRequests UserRequest[] @relation("RequestDepartments")
+  
+  @@unique([code, branchId])
+  @@map("departments")
+}
+
+// Modelo de Ticket
+model Ticket {
+  id            String        @id @default(uuid())
+  ticketNumber  Int           @unique
+  title         String
+  description   String
+  status        TicketStatus  @default(OPEN)
+  priority      TicketPriority @default(MEDIUM)
+  category      String?
+  requestedById String
+  departmentId  String
+  branchId      String
+  assignedToId  String?
+  resolution    String?
+  resolvedAt    DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  requestedBy   User          @relation("TicketCreator", fields: [requestedById], references: [id])
+  assignedTo    User?         @relation("TicketAssignee", fields: [assignedToId], references: [id])
+  department    Department    @relation(fields: [departmentId], references: [id])
+  branch        Branch        @relation(fields: [branchId], references: [id])
+  comments      Comment[]
+  history       TicketHistory[]
+  notifications Notification[]
+  systemLogs    SystemLog[]
+  attachments   Attachment[]
+  
+  @@map("tickets")
+}
+
+// Modelo de Comentario
+model Comment {
+  id        String   @id @default(uuid())
+  content   String
+  ticketId  String
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id])
+  attachments Attachment[]
+  
+  @@map("comments")
+}
+
+// Modelo de Historial de Ticket
+model TicketHistory {
+  id          String   @id @default(uuid())
+  ticketId    String
+  action      String   // "CREATED", "STATUS_CHANGED", "ASSIGNED", etc.
+  oldValue    String?
+  newValue    String?
+  changedBy   String
+  createdAt   DateTime @default(now())
+  
+  ticket      Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  changedByUser User   @relation("TicketHistoryChangedBy", fields: [changedBy], references: [id])
+  
+  @@map("ticket_history")
+}
+
+// Modelo de Notificaciones
+model Notification {
+  id            String           @id @default(uuid())
+  ticketId      String
+  userId        String           // Usuario que recibió la notificación
+  type          NotificationType
+  channel       NotificationChannel
+  title         String
+  message       String
+  isRead        Boolean          @default(false)
+  createdAt     DateTime         @default(now())
+  
+  ticket        Ticket           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("notifications")
+}
+
+// Modelo de Logs del Sistema
+model SystemLog {
+  id          String   @id @default(uuid())
+  level       String   // "INFO", "WARN", "ERROR", "DEBUG"
+  message     String
+  category    String   // "AUTH", "TICKET", "NOTIFICATION", "USER", etc.
+  userId      String?  // Usuario relacionado (opcional)
+  ticketId    String?  // Ticket relacionado (opcional)
+  metadata    String?  @db.Text // JSON string con datos adicionales
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  ticket      Ticket?  @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  
+  @@index([level])
+  @@index([category])
+  @@index([createdAt])
+  @@index([userId])
+  @@map("system_logs")
+}
+
+// Enums
+enum UserRole {
+  ADMIN          // Administrador general / Superadmin - Acceso total
+  TECHNICIAN     // Técnico / Soporte de IT - Ver tickets asignados, cambiar estado, agregar comentarios
+  USER           // Usuario solicitante (Empleado) - Crear tickets, ver los suyos, agregar comentarios, confirmar cierre
+  SUPERVISOR     // Supervisor de sucursal o departamento - Ver todos los tickets de su área, reasignar técnicos, cambiar estado
+  AUDITOR        // Auditor / Viewer (solo lectura) - Acceso de solo lectura a todos los módulos
+}
+
+enum TicketStatus {
+  OPEN          // Nuevo - Ticket recién creado
+  ASSIGNED      // Asignado - Ticket asignado a un técnico
+  IN_PROGRESS   // En progreso - Técnico trabajando
+  PENDING       // En espera - Pausado
+  RESOLVED      // Resuelto - Técnico marcó como resuelto
+  CLOSED        // Cerrado - Solicitante confirmó resolución
+  CANCELLED     // Rechazado - Ticket invalidado
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum NotificationType {
+  TICKET_CREATED
+  TICKET_ASSIGNED
+  TICKET_STATUS_CHANGED
+  TICKET_COMMENT_ADDED
+  TICKET_RESOLVED
+  TICKET_CLOSED
+  TICKET_REJECTED
+}
+
+enum NotificationChannel {
+  WEBSOCKET
+  EMAIL
+  WHATSAPP
+  TELEGRAM
+}
+
+// Modelo de Adjuntos
+model Attachment {
+  id          String    @id @default(uuid())
+  fileName    String    // Nombre del archivo guardado (con timestamp)
+  originalName String   // Nombre original del archivo
+  filePath    String    // Ruta relativa del archivo
+  fileUrl     String    // URL pública del archivo
+  fileSize    Int       // Tamaño en bytes
+  mimeType    String    // Tipo MIME del archivo
+  ticketId    String
+  commentId   String?   // Opcional: adjunto a un comentario
+  uploadedById String
+  createdAt   DateTime  @default(now())
+  
+  ticket      Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  comment     Comment?  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  uploadedBy  User      @relation("AttachmentUploader", fields: [uploadedById], references: [id])
+  
+  @@index([ticketId])
+  @@index([commentId])
+  @@map("attachments")
+}
+
