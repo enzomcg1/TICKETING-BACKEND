@@ -1,6 +1,6 @@
 import express from 'express';
 import prisma from '../config/database';
-import { authenticate, AuthRequest, canEditTicket } from '../middleware/auth';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import { upload, generateFileName } from '../middleware/upload';
 import { getStorageService } from '../services/storage/storageFactory';
 import { loggerService } from '../services/loggerService';
@@ -9,6 +9,16 @@ import fs from 'fs/promises';
 
 const router = express.Router();
 const storageService = getStorageService();
+const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+
+function resolveAttachmentPath(relativePath: string): string {
+  const normalizedRelativePath = relativePath.replace(/^([/\\])+/, '');
+  const resolvedPath = path.resolve(uploadsRoot, normalizedRelativePath);
+  if (!resolvedPath.startsWith(uploadsRoot + path.sep)) {
+    throw new Error('Invalid file path');
+  }
+  return resolvedPath;
+}
 
 // POST /api/attachments/tickets/:ticketId - Subir adjuntos a un ticket
 router.post(
@@ -230,8 +240,12 @@ router.get('/:id/download', authenticate, async (req: AuthRequest, res) => {
       return res.status(403).json({ error: 'No tienes permisos para descargar este archivo' });
     }
 
-    // Obtener la ruta completa del archivo
-    const filePath = path.join(process.cwd(), 'uploads', attachment.filePath);
+    let filePath: string;
+    try {
+      filePath = resolveAttachmentPath(attachment.filePath);
+    } catch {
+      return res.status(400).json({ error: 'Ruta de archivo invalida' });
+    }
     
     // Verificar que el archivo existe
     try {
@@ -240,8 +254,10 @@ router.get('/:id/download', authenticate, async (req: AuthRequest, res) => {
       return res.status(404).json({ error: 'Archivo no encontrado en el servidor' });
     }
 
+    const safeDownloadName = path.basename(attachment.originalName).replace(/[\r\n]/g, '_');
+
     // Enviar el archivo
-    res.download(filePath, attachment.originalName, (err) => {
+    res.download(filePath, safeDownloadName, (err) => {
       if (err) {
         console.error('Error al descargar archivo:', err);
         if (!res.headersSent) {
@@ -326,4 +342,3 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
 });
 
 export default router;
-

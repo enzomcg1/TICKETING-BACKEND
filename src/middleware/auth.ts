@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import prisma from '../config/database';
+import { getJwtSecret } from '../config/security';
 
 // Extender el tipo Request para incluir el usuario
 export interface AuthRequest extends Request {
@@ -20,13 +21,16 @@ export const authenticate = async (
   next: NextFunction
 ) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const authHeader = req.headers.authorization || '';
+    const token = authHeader.toLowerCase().startsWith('bearer ')
+      ? authHeader.slice(7).trim()
+      : '';
 
     if (!token) {
       return res.status(401).json({ error: 'No se proporcionó token de autenticación' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || '') as any;
+    const decoded = jwt.verify(token, getJwtSecret()) as any;
     
     // Verificar que el usuario aún existe en la base de datos
     const user = await prisma.user.findUnique({
@@ -43,6 +47,10 @@ export const authenticate = async (
 
     if (!user) {
       return res.status(401).json({ error: 'Usuario no encontrado' });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({ error: 'Usuario inactivo' });
     }
 
     // Agregar información del usuario al request

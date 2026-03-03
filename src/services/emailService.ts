@@ -3,21 +3,27 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Configurar transporte de email
-// Soporta Outlook y Gmail automáticamente según el dominio del email
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 const createTransporter = () => {
-  const emailUser = process.env.EMAIL_USER || 'prueba-ticket@outlook.com';
-  const emailPass = process.env.EMAIL_PASSWORD || '';
-  
-  console.log('[Email] Configurando transporte SMTP para:', emailUser);
-  
-  // Detectar el proveedor según el dominio del email
+  const emailUser = process.env.EMAIL_USER;
+  const emailPass = process.env.EMAIL_PASSWORD;
+
+  if (!emailUser || !emailPass) {
+    return null;
+  }
+
   const isGmail = emailUser.includes('@gmail.com');
   const isOutlook = emailUser.includes('@outlook.com') || emailUser.includes('@hotmail.com') || emailUser.includes('@live.com');
-  
+
   if (isGmail) {
-    // Configuración para Gmail
-    console.log('[Email] Detectado Gmail, usando configuración SMTP de Gmail');
     return nodemailer.createTransport({
       service: 'gmail',
       auth: {
@@ -25,12 +31,9 @@ const createTransporter = () => {
         pass: emailPass,
       },
     });
-  } else if (isOutlook) {
-    // Configuración para Outlook/Hotmail
-    console.log('[Email] Detectado Outlook, usando configuración SMTP de Outlook');
-    console.log('[Email] ⚠️ NOTA: Outlook ha deshabilitado autenticación básica en muchas cuentas.');
-    console.log('[Email] Si falla, considera usar Gmail o un servicio de terceros.');
-    
+  }
+
+  if (isOutlook) {
     return nodemailer.createTransport({
       host: 'smtp-mail.outlook.com',
       port: 587,
@@ -48,22 +51,20 @@ const createTransporter = () => {
       greetingTimeout: 30000,
       socketTimeout: 30000,
     });
-  } else {
-    // Configuración genérica SMTP
-    console.log('[Email] Usando configuración SMTP genérica');
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp-mail.outlook.com',
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: emailUser,
-        pass: emailPass,
-      },
-      tls: {
-        rejectUnauthorized: false,
-      },
-    });
   }
+
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp-mail.outlook.com',
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: {
+      user: emailUser,
+      pass: emailPass,
+    },
+    tls: {
+      rejectUnauthorized: false,
+    },
+  });
 };
 
 const transporter = createTransporter();
@@ -77,47 +78,30 @@ interface EmailOptions {
 export const sendEmail = async ({ to, subject, html }: EmailOptions): Promise<boolean> => {
   try {
     if (process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'true') {
-      console.log('[Email] Notificaciones de email deshabilitadas, omitiendo envío...');
+      return false;
+    }
+
+    const emailUser = process.env.EMAIL_USER;
+    if (!emailUser || !transporter) {
+      console.error('[Email] EMAIL_USER/EMAIL_PASSWORD no configurados.');
       return false;
     }
 
     if (!to || !to.includes('@')) {
-      console.error('[Email] Email inválido:', to);
       return false;
     }
 
     const mailOptions = {
-      from: `"Sistema de Tickets" <${process.env.EMAIL_USER || 'prueba-ticket@outlook.com'}>`,
+      from: `"Sistema de Tickets" <${emailUser}>`,
       to,
       subject,
       html,
     };
 
-    console.log('[Email] Intentando enviar email a:', to);
-    console.log('[Email] Asunto:', subject);
-    console.log('[Email] Usuario SMTP:', process.env.EMAIL_USER || 'prueba-ticket@outlook.com');
-    
-    // Intentar enviar directamente (verificar puede fallar incluso cuando el envío funciona)
-    // No verificamos la conexión aquí para evitar falsos negativos
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log('[Email] ✅ Email enviado exitosamente. MessageId:', info.messageId);
-    console.log('[Email] Respuesta del servidor:', info.response);
+    await transporter.sendMail(mailOptions);
     return true;
   } catch (error: any) {
-    console.error('[Email] ❌ Error al enviar email:', error);
-    console.error('[Email] Código de error:', error.code);
-    console.error('[Email] Mensaje de error:', error.message);
-    if (error.response) {
-      console.error('[Email] Respuesta del servidor SMTP:', error.response);
-    }
-    if (error.code === 'EAUTH') {
-      console.error('[Email] ⚠️ Error de autenticación. Posibles causas:');
-      console.error('[Email]   1. El App Password puede haber expirado o ser incorrecto');
-      console.error('[Email]   2. Outlook puede haber deshabilitado la autenticación básica');
-      console.error('[Email]   3. Necesitas generar un nuevo App Password desde https://account.microsoft.com/security');
-      console.error('[Email]   4. Verifica que el email sea: ', process.env.EMAIL_USER || 'prueba-ticket@outlook.com');
-    }
+    console.error('[Email] Error al enviar email:', error?.message || error);
     return false;
   }
 };
@@ -143,20 +127,26 @@ export const createEmailTemplate = (
   };
 
   const statusEmojis: Record<string, string> = {
-    OPEN: '🆕',
-    ASSIGNED: '🎯',
-    IN_PROGRESS: '🔧',
-    PENDING: '⏸️',
-    RESOLVED: '✅',
-    CLOSED: '🏁',
-    CANCELLED: '❌',
+    OPEN: 'Nuevo',
+    ASSIGNED: 'Asignado',
+    IN_PROGRESS: 'En progreso',
+    PENDING: 'En espera',
+    RESOLVED: 'Resuelto',
+    CLOSED: 'Cerrado',
+    CANCELLED: 'Rechazado',
   };
 
-  // Si es un comentario, usar emoji de comentario
+  const safeTicketTitle = escapeHtml(ticketTitle || 'Ticket');
+  const safeStatus = escapeHtml(statusLabels[status] || status);
+  const safeUserName = escapeHtml(userName || 'Sistema');
+  const safeDate = escapeHtml(date || '');
+  const safeLink = escapeHtml(link || '#');
+  const safeComment = comment ? escapeHtml(comment) : '';
+  const safeRequestedByName = requestedByName ? escapeHtml(requestedByName) : '';
+
   const isComment = type === 'TICKET_COMMENT_ADDED';
-  const emoji = isComment ? '💬' : (statusEmojis[status] || '📋');
-  const statusLabel = statusLabels[status] || status;
-  const title = isComment ? `Nuevo comentario: ${ticketTitle}` : `${statusLabel}: ${ticketTitle}`;
+  const emoji = isComment ? 'Comentario' : (statusEmojis[status] || 'Ticket');
+  const title = isComment ? `Nuevo comentario: ${safeTicketTitle}` : `${safeStatus}: ${safeTicketTitle}`;
 
   return `
     <!DOCTYPE html>
@@ -182,20 +172,20 @@ export const createEmailTemplate = (
         </div>
         <div class="content">
           <div class="ticket-info">
-            ${!isComment ? `<p><strong>Estado actual:</strong> ${statusLabel}</p>` : ''}
-            <p><strong>Fecha y hora:</strong> ${date}</p>
-            <p><strong>Usuario responsable:</strong> ${userName}</p>
-            ${requestedByName ? `<p><strong>Usuario solicitante:</strong> ${requestedByName}</p>` : ''}
+            ${!isComment ? `<p><strong>Estado actual:</strong> ${safeStatus}</p>` : ''}
+            <p><strong>Fecha y hora:</strong> ${safeDate}</p>
+            <p><strong>Usuario responsable:</strong> ${safeUserName}</p>
+            ${safeRequestedByName ? `<p><strong>Usuario solicitante:</strong> ${safeRequestedByName}</p>` : ''}
           </div>
-          ${comment ? `
+          ${safeComment ? `
           <div class="comment-box">
-            <p><strong>💬 Comentario:</strong></p>
-            <p class="comment-text">${comment}</p>
+            <p><strong>Comentario:</strong></p>
+            <p class="comment-text">${safeComment}</p>
           </div>
           ` : ''}
-          <a href="${link}" class="button">Ver Ticket</a>
+          <a href="${safeLink}" class="button">Ver Ticket</a>
           <div class="footer">
-            <p>Sistema de Gestión de Tickets - Departamento de Informática</p>
+            <p>Sistema de Gestion de Tickets - Departamento de Informatica</p>
           </div>
         </div>
       </div>
@@ -203,4 +193,3 @@ export const createEmailTemplate = (
     </html>
   `;
 };
-

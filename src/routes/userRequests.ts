@@ -5,20 +5,30 @@ import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 import { loggerService } from '../services/loggerService';
 
 const router = express.Router();
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // POST /api/user-requests - Crear solicitud de registro (público, no requiere auth)
 router.post('/', async (req, res) => {
   try {
     const { name, email, password, requestedRole, departmentId, branchId } = req.body;
+    const normalizedEmail = String(email || '').trim().toLowerCase();
 
     // Validar campos requeridos
-    if (!name || !email || !password || !requestedRole) {
+    if (!name || !normalizedEmail || !password || !requestedRole) {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
+    }
+
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      return res.status(400).json({ error: 'Email inválido' });
+    }
+
+    if (String(password).length < 8) {
+      return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
     }
 
     // Validar que el email no exista en usuarios
     const existingUser = await prisma.user.findUnique({
-      where: { email }
+      where: { email: normalizedEmail }
     });
 
     if (existingUser) {
@@ -27,7 +37,7 @@ router.post('/', async (req, res) => {
 
     // Validar que el email no tenga una solicitud pendiente
     const existingRequest = await prisma.userRequest.findUnique({
-      where: { email }
+      where: { email: normalizedEmail }
     });
 
     if (existingRequest && existingRequest.status === 'PENDING') {
@@ -47,7 +57,7 @@ router.post('/', async (req, res) => {
     const userRequest = await prisma.userRequest.create({
       data: {
         name,
-        email,
+        email: normalizedEmail,
         password: hashedPassword,
         requestedRole,
         departmentId: departmentId || null,
@@ -294,4 +304,3 @@ router.post('/:id/reject', authenticate, authorize('ADMIN'), async (req: AuthReq
 });
 
 export default router;
-

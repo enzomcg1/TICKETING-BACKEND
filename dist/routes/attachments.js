@@ -13,6 +13,15 @@ const path_1 = __importDefault(require("path"));
 const promises_1 = __importDefault(require("fs/promises"));
 const router = express_1.default.Router();
 const storageService = (0, storageFactory_1.getStorageService)();
+const uploadsRoot = path_1.default.resolve(process.cwd(), 'uploads');
+function resolveAttachmentPath(relativePath) {
+    const normalizedRelativePath = relativePath.replace(/^([/\\])+/, '');
+    const resolvedPath = path_1.default.resolve(uploadsRoot, normalizedRelativePath);
+    if (!resolvedPath.startsWith(uploadsRoot + path_1.default.sep)) {
+        throw new Error('Invalid file path');
+    }
+    return resolvedPath;
+}
 // POST /api/attachments/tickets/:ticketId - Subir adjuntos a un ticket
 router.post('/tickets/:ticketId', auth_1.authenticate, upload_1.upload.array('files', 5), async (req, res) => {
     try {
@@ -194,8 +203,13 @@ router.get('/:id/download', auth_1.authenticate, async (req, res) => {
         if (!canView) {
             return res.status(403).json({ error: 'No tienes permisos para descargar este archivo' });
         }
-        // Obtener la ruta completa del archivo
-        const filePath = path_1.default.join(process.cwd(), 'uploads', attachment.filePath);
+        let filePath;
+        try {
+            filePath = resolveAttachmentPath(attachment.filePath);
+        }
+        catch {
+            return res.status(400).json({ error: 'Ruta de archivo invalida' });
+        }
         // Verificar que el archivo existe
         try {
             await promises_1.default.access(filePath);
@@ -203,8 +217,9 @@ router.get('/:id/download', auth_1.authenticate, async (req, res) => {
         catch {
             return res.status(404).json({ error: 'Archivo no encontrado en el servidor' });
         }
+        const safeDownloadName = path_1.default.basename(attachment.originalName).replace(/[\r\n]/g, '_');
         // Enviar el archivo
-        res.download(filePath, attachment.originalName, (err) => {
+        res.download(filePath, safeDownloadName, (err) => {
             if (err) {
                 console.error('Error al descargar archivo:', err);
                 if (!res.headersSent) {

@@ -7,6 +7,7 @@ const express_1 = __importDefault(require("express"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = __importDefault(require("../config/database"));
 const auth_1 = require("../middleware/auth");
+const loggerService_1 = require("../services/loggerService");
 const router = express_1.default.Router();
 // GET /api/users - Listar todos los usuarios (solo ADMIN y SUPERVISOR)
 router.get('/', auth_1.authenticate, async (req, res) => {
@@ -232,8 +233,8 @@ router.put('/:id/password', auth_1.authenticate, async (req, res) => {
         if (!newPassword) {
             return res.status(400).json({ error: 'La nueva contraseña es requerida' });
         }
-        if (newPassword.length < 6) {
-            return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+        if (newPassword.length < 8) {
+            return res.status(400).json({ error: 'La contrase�a debe tener al menos 8 caracteres' });
         }
         const targetUser = await database_1.default.user.findUnique({
             where: { id },
@@ -468,10 +469,26 @@ router.delete('/:id', auth_1.authenticate, async (req, res) => {
                 where: { userId: id }
             });
         }
+        // Guardar información del usuario antes de eliminarlo para el log
+        const userEmail = targetUser.email;
+        const userName = targetUser.name;
+        const userRole = targetUser.role;
         // Ahora podemos eliminar el usuario
         await database_1.default.user.delete({
             where: { id },
         });
+        // Registrar evento en el historial
+        const requestInfo = loggerService_1.loggerService.extractRequestInfo(req);
+        loggerService_1.loggerService.info(`Usuario eliminado: ${userName} (${userEmail}) con rol ${userRole}`, 'USER', {
+            userId: user.id,
+            metadata: {
+                deletedUserId: id,
+                deletedUserEmail: userEmail,
+                deletedUserName: userName,
+                deletedUserRole: userRole,
+            },
+            ...requestInfo,
+        }).catch(err => console.error('Error al registrar log de eliminación de usuario:', err));
         res.json({ message: 'Usuario eliminado exitosamente' });
     }
     catch (error) {

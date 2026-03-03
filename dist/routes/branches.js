@@ -7,8 +7,8 @@ const express_1 = __importDefault(require("express"));
 const database_1 = __importDefault(require("../config/database"));
 const auth_1 = require("../middleware/auth");
 const router = express_1.default.Router();
-// GET /api/branches - Listar todas las sucursales (todos pueden ver)
-router.get('/', auth_1.authenticate, async (req, res) => {
+// GET /api/branches - Listar todas las sucursales (público para registro)
+router.get('/', async (req, res) => {
     try {
         const branches = await database_1.default.branch.findMany({
             where: { isActive: true },

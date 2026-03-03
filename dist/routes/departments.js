@@ -7,19 +7,22 @@ const express_1 = __importDefault(require("express"));
 const database_1 = __importDefault(require("../config/database"));
 const auth_1 = require("../middleware/auth");
 const router = express_1.default.Router();
-// GET /api/departments - Listar departamentos
-router.get('/', auth_1.authenticate, async (req, res) => {
+// GET /api/departments - Listar departamentos (público para registro)
+router.get('/', async (req, res) => {
     try {
         const { branchId } = req.query;
-        const user = req.user;
         let where = { isActive: true };
         // Si se especifica branchId, filtrar por sucursal
         if (branchId) {
             where.branchId = branchId;
         }
-        // SUPERVISOR solo ve departamentos de su sucursal
-        if (user.role === 'SUPERVISOR' && user.branchId) {
-            where.branchId = user.branchId;
+        // Si hay usuario autenticado, aplicar restricciones de rol
+        if (req.user) {
+            const user = req.user;
+            // SUPERVISOR solo ve departamentos de su sucursal
+            if (user.role === 'SUPERVISOR' && user.branchId) {
+                where.branchId = user.branchId;
+            }
         }
         const departments = await database_1.default.department.findMany({
             where,

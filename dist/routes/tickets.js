@@ -1212,6 +1212,147 @@ router.get('/stats', auth_1.authenticate, async (req, res) => {
         res.status(500).json({ error: 'Error al obtener estadísticas' });
     }
 });
+// GET /api/tickets/history - Obtener historial de cambios global (tickets + usuarios)
+// IMPORTANTE: Esta ruta debe estar ANTES de /:id para que no se interprete "history" como un ID
+router.get('/history', auth_1.authenticate, async (req, res) => {
+    try {
+        const user = req.user;
+        // Solo ADMIN y AUDITOR pueden ver el historial completo
+        if (user.role !== 'ADMIN' && user.role !== 'AUDITOR') {
+            return res.status(403).json({ error: 'No tiene permisos para ver el historial de cambios' });
+        }
+        const { action, ticketId, changedBy, userSearch, category, startDate, endDate, page = '1', limit = '50', } = req.query;
+        const pageNum = parseInt(page, 10);
+        const limitNum = parseInt(limit, 10);
+        const skip = (pageNum - 1) * limitNum;
+        // Si se proporciona userSearch, buscar usuarios que coincidan
+        let userIds = undefined;
+        if (userSearch && typeof userSearch === 'string' && userSearch.trim()) {
+            const searchTerm = userSearch.trim();
+            const matchingUsers = await database_1.default.user.findMany({
+                where: {
+                    OR: [
+                        { name: { contains: searchTerm, mode: 'insensitive' } },
+                        { email: { contains: searchTerm, mode: 'insensitive' } },
+                    ],
+                },
+                select: { id: true },
+            });
+            userIds = matchingUsers.map(u => u.id);
+            // Si no hay usuarios que coincidan, no mostrar ningún evento
+            if (userIds.length === 0) {
+                userIds = ['no-match-id-that-will-not-exist'];
+            }
+        }
+        // Construir filtros para TicketHistory
+        const historyWhere = {};
+        if (action) {
+            historyWhere.action = action;
+        }
+        if (ticketId) {
+            historyWhere.ticketId = ticketId;
+        }
+        // Usar changedBy (ID específico) o userIds (búsqueda por texto)
+        if (changedBy) {
+            historyWhere.changedBy = changedBy;
+        }
+        else if (userIds) {
+            historyWhere.changedBy = { in: userIds };
+        }
+        if (startDate || endDate) {
+            historyWhere.createdAt = {};
+            if (startDate) {
+                historyWhere.createdAt.gte = new Date(startDate);
+            }
+            if (endDate) {
+                historyWhere.createdAt.lte = new Date(endDate);
+            }
+        }
+        // Construir filtros para SystemLog (solo eventos de usuarios)
+        const logWhere = {
+            category: 'USER', // Solo eventos relacionados con usuarios
+        };
+        // Usar changedBy (ID específico) o userIds (búsqueda por texto)
+        if (changedBy) {
+            logWhere.userId = changedBy;
+        }
+        else if (userIds) {
+            logWhere.userId = { in: userIds };
+        }
+        if (startDate || endDate) {
+            logWhere.createdAt = {};
+            if (startDate) {
+                logWhere.createdAt.gte = new Date(startDate);
+            }
+            if (endDate) {
+                logWhere.createdAt.lte = new Date(endDate);
+            }
+        }
+        // Obtener ambos tipos de eventos
+        const [ticketHistory, systemLogs] = await Promise.all([
+            database_1.default.ticketHistory.findMany({
+                where: historyWhere,
+                include: {
+                    changedByUser: {
+                        select: { id: true, name: true, email: true },
+                    },
+                    ticket: {
+                        select: { id: true, title: true, ticketNumber: true },
+                    },
+                },
+                orderBy: { createdAt: 'desc' },
+            }),
+            database_1.default.systemLog.findMany({
+                where: logWhere,
+                include: {
+                    user: {
+                        select: { id: true, name: true, email: true },
+                    },
+                },
+                orderBy: { createdAt: 'desc' },
+            }),
+        ]);
+        const combinedEvents = [
+            ...ticketHistory.map(h => ({
+                id: h.id,
+                type: 'ticket_history',
+                action: h.action,
+                createdAt: h.createdAt,
+                changedByUser: h.changedByUser,
+                ticket: h.ticket || undefined,
+                oldValue: h.oldValue || undefined,
+                newValue: h.newValue || undefined,
+            })),
+            ...systemLogs.map(log => ({
+                id: log.id,
+                type: 'system_log',
+                message: log.message,
+                createdAt: log.createdAt,
+                user: log.user || undefined,
+                metadata: log.metadata ? JSON.parse(log.metadata) : undefined,
+            })),
+        ];
+        // Ordenar por fecha descendente
+        combinedEvents.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        const total = combinedEvents.length;
+        const totalPages = Math.ceil(total / limitNum);
+        // Paginar
+        const paginatedEvents = combinedEvents.slice(skip, skip + limitNum);
+        res.json({
+            history: paginatedEvents,
+            pagination: {
+                page: pageNum,
+                limit: limitNum,
+                total,
+                totalPages,
+            },
+        });
+    }
+    catch (error) {
+        console.error('Error al obtener historial de cambios:', error);
+        res.status(500).json({ error: 'Error al obtener el historial de cambios' });
+    }
+});
 // GET /api/tickets/:id - Obtener un ticket específico
 router.get('/:id', auth_1.authenticate, async (req, res) => {
     try {

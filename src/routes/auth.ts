@@ -4,46 +4,48 @@ import jwt from 'jsonwebtoken';
 import prisma from '../config/database';
 import { authenticate } from '../middleware/auth';
 import { loggerService } from '../services/loggerService';
+import { getJwtSecret } from '../config/security';
+import { clearLoginRateLimit, loginRateLimit } from '../middleware/security';
 
 const router = express.Router();
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // POST /api/auth/register - Registrar nuevo usuario (solo ADMIN)
 router.post('/register', authenticate, async (req: any, res) => {
   try {
-    // Verificar que el usuario autenticado es ADMIN
     if (req.user?.role !== 'ADMIN') {
       return res.status(403).json({ error: 'Solo los administradores pueden crear usuarios' });
     }
 
     const { email, password, name, role, departmentId, branchId } = req.body;
 
-    // Validar campos requeridos
     if (!email || !password || !name || !role) {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
 
-    // Verificar que el email no exista
-    const existingUser = await prisma.user.findUnique({
-      where: { email }
-    });
-
-    if (existingUser) {
-      return res.status(400).json({ error: 'El email ya está registrado' });
+    if (!EMAIL_REGEX.test(email.trim())) {
+      return res.status(400).json({ error: 'Email invalido' });
     }
 
-    // Validar que el rol sea válido
+    if (password.length < 8) {
+      return res.status(400).json({ error: 'La contrasena debe tener al menos 8 caracteres' });
+    }
+
+    const existingUser = await prisma.user.findUnique({ where: { email: email.trim() } });
+    if (existingUser) {
+      return res.status(400).json({ error: 'El email ya esta registrado' });
+    }
+
     const validRoles = ['ADMIN', 'TECHNICIAN', 'USER', 'SUPERVISOR', 'AUDITOR'];
     if (!validRoles.includes(role)) {
-      return res.status(400).json({ error: 'Rol inválido' });
+      return res.status(400).json({ error: 'Rol invalido' });
     }
 
-    // Hash de la contraseña
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Crear usuario
     const user = await prisma.user.create({
       data: {
-        email,
+        email: email.trim(),
         password: hashedPassword,
         name,
         role,
@@ -61,7 +63,6 @@ router.post('/register', authenticate, async (req: any, res) => {
       }
     });
 
-    // Registrar evento en el historial
     const requestInfo = loggerService.extractRequestInfo(req);
     loggerService.info(
       `Usuario creado: ${user.name} (${user.email}) con rol ${user.role}`,
@@ -76,7 +77,7 @@ router.post('/register', authenticate, async (req: any, res) => {
         },
         ...requestInfo,
       }
-    ).catch(err => console.error('Error al registrar log de creación de usuario:', err));
+    ).catch((err) => console.error('Error al registrar log de creacion de usuario:', err));
 
     res.status(201).json({
       message: 'Usuario creado exitosamente',
@@ -88,74 +89,65 @@ router.post('/register', authenticate, async (req: any, res) => {
   }
 });
 
-// POST /api/auth/login - Iniciar sesión
-router.post('/login', async (req, res) => {
+// POST /api/auth/login - Iniciar sesion
+router.post('/login', loginRateLimit, async (req, res) => {
   try {
-    console.log('[LOGIN] Solicitud de login recibida');
     const { email, password } = req.body;
 
     if (!email || !password) {
-      console.log('[LOGIN] Campos faltantes');
-      return res.status(400).json({ error: 'Usuario/Email y contraseña son requeridos' });
+      return res.status(400).json({ error: 'Usuario/Email y contrasena son requeridos' });
     }
 
-    console.log(`[LOGIN] Buscando usuario con email: ${email.trim()}`);
+    const normalizedEmail = String(email).trim().toLowerCase();
+    if (!EMAIL_REGEX.test(normalizedEmail)) {
+      return res.status(400).json({ error: 'Email invalido' });
+    }
 
-    // Buscar usuario por email (puede ser username o email)
-    let user;
-    try {
-      user = await prisma.user.findUnique({
-        where: { email: email.trim() },
-        select: {
-          id: true,
-          email: true,
-          password: true,
-          name: true,
-          role: true,
-          departmentId: true,
-          branchId: true,
-          department: {
-            select: { id: true, name: true, code: true }
-          },
-          branch: {
-            select: { id: true, name: true, code: true }
-          }
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      select: {
+        id: true,
+        email: true,
+        password: true,
+        name: true,
+        role: true,
+        isActive: true,
+        department: {
+          select: { id: true, name: true, code: true }
+        },
+        branch: {
+          select: { id: true, name: true, code: true }
         }
-      });
-      console.log(`[LOGIN] Usuario encontrado: ${user ? user.name : 'No encontrado'}`);
-    } catch (dbError: any) {
-      console.error('[LOGIN] Error al buscar usuario en BD:', dbError.message);
-      console.error('[LOGIN] Código de error:', dbError.code);
-      throw dbError;
-    }
+      }
+    });
 
     if (!user) {
-      return res.status(401).json({ error: 'Credenciales inválidas' });
+      return res.status(401).json({ error: 'Credenciales invalidas' });
     }
 
-    // Verificar contraseña
+    if (!user.isActive) {
+      return res.status(403).json({ error: 'Usuario inactivo' });
+    }
+
     const isValidPassword = await bcrypt.compare(password, user.password);
-
     if (!isValidPassword) {
-      return res.status(401).json({ error: 'Credenciales inválidas' });
+      return res.status(401).json({ error: 'Credenciales invalidas' });
     }
 
-    // Generar JWT
-    const jwtSecret = process.env.JWT_SECRET || 'ticketing_system_secret_key_2024_change_in_production';
-    const expiresIn = process.env.JWT_EXPIRES_IN || '7d';
     const token = jwt.sign(
       {
         userId: user.id,
         email: user.email,
         role: user.role,
       },
-      jwtSecret,
+      getJwtSecret(),
       {
-        expiresIn: expiresIn,
+        expiresIn: process.env.JWT_EXPIRES_IN || '7d',
       } as jwt.SignOptions
     );
 
-    // Retornar información del usuario y token (sin password)
+    clearLoginRateLimit(req);
+
     res.json({
       message: 'Login exitoso',
       token,
@@ -169,16 +161,15 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (error: any) {
-    console.error('Error al iniciar sesión:', error);
-    console.error('Stack trace:', error.stack);
-    res.status(500).json({ 
-      error: 'Error al iniciar sesión',
+    console.error('Error al iniciar sesion:', error);
+    res.status(500).json({
+      error: 'Error al iniciar sesion',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
 
-// GET /api/auth/me - Obtener información del usuario actual
+// GET /api/auth/me - Obtener informacion del usuario actual
 router.get('/me', authenticate, async (req: any, res) => {
   try {
     const user = await prisma.user.findUnique({
@@ -211,21 +202,20 @@ router.get('/me', authenticate, async (req: any, res) => {
   }
 });
 
-// PUT /api/auth/change-password - Cambiar contraseña propia
+// PUT /api/auth/change-password - Cambiar contrasena propia
 router.put('/change-password', authenticate, async (req: any, res) => {
   try {
     const user = req.user!;
     const { currentPassword, newPassword } = req.body;
 
     if (!currentPassword || !newPassword) {
-      return res.status(400).json({ error: 'La contraseña actual y la nueva contraseña son requeridas' });
+      return res.status(400).json({ error: 'La contrasena actual y la nueva contrasena son requeridas' });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({ error: 'La nueva contraseña debe tener al menos 6 caracteres' });
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'La nueva contrasena debe tener al menos 8 caracteres' });
     }
 
-    // Obtener el usuario con la contraseña
     const userWithPassword = await prisma.user.findUnique({
       where: { id: user.id },
       select: {
@@ -238,17 +228,13 @@ router.put('/change-password', authenticate, async (req: any, res) => {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
-    // Verificar la contraseña actual
     const isValidPassword = await bcrypt.compare(currentPassword, userWithPassword.password);
-
     if (!isValidPassword) {
-      return res.status(401).json({ error: 'La contraseña actual es incorrecta' });
+      return res.status(401).json({ error: 'La contrasena actual es incorrecta' });
     }
 
-    // Hash de la nueva contraseña
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Actualizar la contraseña
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -256,12 +242,11 @@ router.put('/change-password', authenticate, async (req: any, res) => {
       }
     });
 
-    res.json({ message: 'Contraseña actualizada exitosamente' });
+    res.json({ message: 'Contrasena actualizada exitosamente' });
   } catch (error) {
-    console.error('Error al cambiar contraseña:', error);
-    res.status(500).json({ error: 'Error al cambiar contraseña' });
+    console.error('Error al cambiar contrasena:', error);
+    res.status(500).json({ error: 'Error al cambiar contrasena' });
   }
 });
 
 export default router;
-

@@ -7,25 +7,34 @@ const express_1 = __importDefault(require("express"));
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const database_1 = __importDefault(require("../config/database"));
 const auth_1 = require("../middleware/auth");
+const loggerService_1 = require("../services/loggerService");
 const router = express_1.default.Router();
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // POST /api/user-requests - Crear solicitud de registro (público, no requiere auth)
 router.post('/', async (req, res) => {
     try {
         const { name, email, password, requestedRole, departmentId, branchId } = req.body;
+        const normalizedEmail = String(email || '').trim().toLowerCase();
         // Validar campos requeridos
-        if (!name || !email || !password || !requestedRole) {
+        if (!name || !normalizedEmail || !password || !requestedRole) {
             return res.status(400).json({ error: 'Faltan campos requeridos' });
+        }
+        if (!EMAIL_REGEX.test(normalizedEmail)) {
+            return res.status(400).json({ error: 'Email inválido' });
+        }
+        if (String(password).length < 8) {
+            return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres' });
         }
         // Validar que el email no exista en usuarios
         const existingUser = await database_1.default.user.findUnique({
-            where: { email }
+            where: { email: normalizedEmail }
         });
         if (existingUser) {
             return res.status(400).json({ error: 'El email ya está registrado' });
         }
         // Validar que el email no tenga una solicitud pendiente
         const existingRequest = await database_1.default.userRequest.findUnique({
-            where: { email }
+            where: { email: normalizedEmail }
         });
         if (existingRequest && existingRequest.status === 'PENDING') {
             return res.status(400).json({ error: 'Ya existe una solicitud pendiente con este email' });
@@ -41,7 +50,7 @@ router.post('/', async (req, res) => {
         const userRequest = await database_1.default.userRequest.create({
             data: {
                 name,
-                email,
+                email: normalizedEmail,
                 password: hashedPassword,
                 requestedRole,
                 departmentId: departmentId || null,
@@ -181,6 +190,19 @@ router.post('/:id/approve', auth_1.authenticate, (0, auth_1.authorize)('ADMIN'),
                 processedAt: new Date()
             }
         });
+        // Registrar evento en el historial
+        const requestInfo = loggerService_1.loggerService.extractRequestInfo(req);
+        loggerService_1.loggerService.info(`Solicitud de registro aprobada y usuario creado: ${newUser.name} (${newUser.email}) con rol ${newUser.role}`, 'USER', {
+            userId: user.id,
+            metadata: {
+                requestId: id,
+                createdUserId: newUser.id,
+                createdUserEmail: newUser.email,
+                createdUserName: newUser.name,
+                createdUserRole: newUser.role,
+            },
+            ...requestInfo,
+        }).catch(err => console.error('Error al registrar log de aprobación de solicitud:', err));
         // TODO: Enviar email al nuevo usuario con credenciales
         // sendWelcomeEmail(newUser.email, userRequest.email);
         res.json({
@@ -218,6 +240,19 @@ router.post('/:id/reject', auth_1.authenticate, (0, auth_1.authorize)('ADMIN'), 
                 rejectionReason: rejectionReason || null
             }
         });
+        // Registrar evento en el historial
+        const requestInfo = loggerService_1.loggerService.extractRequestInfo(req);
+        loggerService_1.loggerService.info(`Solicitud de registro rechazada: ${userRequest.name} (${userRequest.email}) con rol solicitado ${userRequest.requestedRole}${rejectionReason ? `. Motivo: ${rejectionReason}` : ''}`, 'USER', {
+            userId: user.id,
+            metadata: {
+                requestId: id,
+                requestEmail: userRequest.email,
+                requestName: userRequest.name,
+                requestedRole: userRequest.requestedRole,
+                rejectionReason: rejectionReason || null,
+            },
+            ...requestInfo,
+        }).catch(err => console.error('Error al registrar log de rechazo de solicitud:', err));
         // TODO: Enviar email al solicitante informando el rechazo
         // sendRejectionEmail(userRequest.email, rejectionReason);
         res.json({

@@ -255,8 +255,8 @@ router.put('/:id/password', authenticate, async (req: AuthRequest, res) => {
       return res.status(400).json({ error: 'La nueva contraseña es requerida' });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'La contrase�a debe tener al menos 8 caracteres' });
     }
 
     const targetUser = await prisma.user.findUnique({

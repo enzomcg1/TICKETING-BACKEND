@@ -6,14 +6,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.canViewLogs = exports.canDeleteTicket = exports.canAddComment = exports.canCreateTicket = exports.canManageConfig = exports.canDeleteUser = exports.canCreateUser = exports.canChangeTicketStatus = exports.canAssignTicket = exports.canEditTicket = exports.canViewDepartmentTickets = exports.canViewBranchTickets = exports.canViewAllTickets = exports.authorize = exports.authenticate = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const database_1 = __importDefault(require("../config/database"));
+const security_1 = require("../config/security");
 // Middleware de autenticación JWT
 const authenticate = async (req, res, next) => {
     try {
-        const token = req.headers.authorization?.replace('Bearer ', '');
+        const authHeader = req.headers.authorization || '';
+        const token = authHeader.toLowerCase().startsWith('bearer ')
+            ? authHeader.slice(7).trim()
+            : '';
         if (!token) {
             return res.status(401).json({ error: 'No se proporcionó token de autenticación' });
         }
-        const decoded = jsonwebtoken_1.default.verify(token, process.env.JWT_SECRET || '');
+        const decoded = jsonwebtoken_1.default.verify(token, (0, security_1.getJwtSecret)());
         // Verificar que el usuario aún existe en la base de datos
         const user = await database_1.default.user.findUnique({
             where: { id: decoded.userId },
@@ -28,6 +32,9 @@ const authenticate = async (req, res, next) => {
         });
         if (!user) {
             return res.status(401).json({ error: 'Usuario no encontrado' });
+        }
+        if (!user.isActive) {
+            return res.status(403).json({ error: 'Usuario inactivo' });
         }
         // Agregar información del usuario al request
         req.user = {

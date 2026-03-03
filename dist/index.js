@@ -17,53 +17,28 @@ const notifications_1 = __importDefault(require("./routes/notifications"));
 const logs_1 = __importDefault(require("./routes/logs"));
 const attachments_1 = __importDefault(require("./routes/attachments"));
 const socket_1 = require("./config/socket");
+const security_1 = require("./config/security");
+const security_2 = require("./middleware/security");
 const path_1 = __importDefault(require("path"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
 const httpServer = http_1.default.createServer(app);
 const PORT = parseInt(process.env.PORT || '3000', 10);
+const allowedOrigins = (0, security_1.getAllowedOrigins)();
+if ((0, security_1.isProduction)() && allowedOrigins.length === 0) {
+    throw new Error('FRONTEND_URL es obligatorio en produccion');
+}
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
 // Inicializar Socket.IO
 (0, socket_1.initializeSocket)(httpServer);
 // Middlewares
-// Configurar CORS para permitir túneles (ngrok, etc.)
 const corsOptions = {
     origin: function (origin, callback) {
-        // Permitir solicitudes sin origen (aplicaciones móviles, Postman, etc.)
+        // Permitir solicitudes sin origen (health checks/scripts)
         if (!origin)
             return callback(null, true);
-        const allowedOrigins = process.env.FRONTEND_URL
-            ? process.env.FRONTEND_URL.split(',').map(url => url.trim())
-            : ['http://localhost:5173', 'http://localhost:5174', 'http://192.168.100.4:5173'];
-        // Permitir cualquier origen si no hay FRONTEND_URL definido (desarrollo)
-        if (process.env.FRONTEND_URL === undefined || allowedOrigins.includes('*')) {
-            return callback(null, true);
-        }
-        // Verificar si el origen está en la lista permitida
-        if (allowedOrigins.includes(origin)) {
-            return callback(null, true);
-        }
-        // Permitir conexiones de localhost en cualquier puerto (desarrollo)
-        const isLocalhost = /^https?:\/\/localhost(:\d+)?$/.test(origin);
-        if (isLocalhost) {
-            return callback(null, true);
-        }
-        // Permitir conexiones de la red local (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
-        // Esto incluye redes VPN comunes (10.8.0.x para OpenVPN)
-        const isLocalNetwork = /^https?:\/\/(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.)/.test(origin);
-        if (isLocalNetwork) {
-            return callback(null, true);
-        }
-        // Permitir conexiones de DevTunnels (Microsoft)
-        // DevTunnels puede tener varios formatos: .devtunnels.ms, .brs.devtunnels.ms, etc.
-        const isDevTunnels = /devtunnels\.ms/i.test(origin);
-        if (isDevTunnels) {
-            console.log(`[CORS] Permitiendo conexión desde DevTunnels: ${origin}`);
-            return callback(null, true);
-        }
-        // Permitir conexiones de otros servicios de túnel comunes
-        const isTunnelService = /\.(ngrok|localtunnel|cloudflared|ngrok-free|ngrok\.io)\./.test(origin);
-        if (isTunnelService) {
-            console.log(`[CORS] Permitiendo conexión desde túnel: ${origin}`);
+        if ((0, security_1.isOriginAllowed)(origin)) {
             return callback(null, true);
         }
         console.log(`[CORS] Origen no permitido: ${origin}`);
@@ -73,16 +48,16 @@ const corsOptions = {
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     exposedHeaders: ['Content-Range', 'X-Content-Range'],
-    maxAge: 86400, // 24 horas
+    maxAge: 86400,
 };
+app.use(security_2.securityHeaders);
 app.use((0, cors_1.default)(corsOptions));
-// Manejar solicitudes OPTIONS explícitamente (preflight)
 app.options('*', (0, cors_1.default)(corsOptions));
-app.use(express_1.default.json());
-app.use(express_1.default.urlencoded({ extended: true }));
-// Servir archivos estáticos (uploads)
+app.use(express_1.default.json({ limit: '1mb' }));
+app.use(express_1.default.urlencoded({ extended: true, limit: '1mb' }));
+// Servir archivos estaticos (uploads)
 app.use('/uploads', express_1.default.static(path_1.default.join(process.cwd(), 'uploads')));
-// Routes públicas
+// Routes publicas
 app.use('/api/auth', auth_1.default);
 app.use('/api/user-requests', userRequests_1.default);
 // Routes protegidas
@@ -93,10 +68,10 @@ app.use('/api/departments', departments_1.default);
 app.use('/api/notifications', notifications_1.default);
 app.use('/api/logs', logs_1.default);
 app.use('/api/attachments', attachments_1.default);
-// Ruta raíz
+// Ruta raiz
 app.get('/', (req, res) => {
     res.json({
-        message: 'Sistema de Gestión de Tickets - API Backend',
+        message: 'Sistema de Gestion de Tickets - API Backend',
         version: '1.0.0',
         status: 'running',
         endpoints: {
@@ -111,7 +86,7 @@ app.get('/', (req, res) => {
             logs: '/api/logs',
             attachments: '/api/attachments'
         },
-        documentation: 'Visita /api/health para más información',
+        documentation: 'Visita /api/health para mas informacion',
         timestamp: new Date().toISOString()
     });
 });
@@ -135,12 +110,11 @@ app.get('/api/health', (req, res) => {
         timestamp: new Date().toISOString()
     });
 });
-// Escuchar en todas las interfaces de red (0.0.0.0)
 httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-    console.log(`📡 Socket.IO initialized`);
-    console.log(`🌐 Server accessible on:`);
+    console.log(`Server running on port ${PORT}`);
+    console.log('Socket.IO initialized');
+    console.log('Server accessible on:');
     console.log(`   - http://localhost:${PORT}`);
     console.log(`   - http://0.0.0.0:${PORT}`);
-    console.log(`   - http://[YOUR_LOCAL_IP]:${PORT} (access from network)`);
+    console.log(`   - http://[YOUR_LOCAL_IP]:${PORT}`);
 });
