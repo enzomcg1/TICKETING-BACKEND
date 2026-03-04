@@ -17,6 +17,19 @@ interface NotificationData {
   departmentName?: string;
 }
 
+function emitTicketNotificationSafe(userId: string, payload: any): void {
+  if (process.env.ENABLE_SOCKET_NOTIFICATIONS === 'false') {
+    return;
+  }
+
+  try {
+    const io = getIO();
+    io.to(`user-${userId}`).emit('ticket-notification', payload);
+  } catch (socketError: any) {
+    console.error('[Notification] Socket emit failed:', socketError?.message || socketError);
+  }
+}
+
 // Obtener usuarios que deben recibir notificaciones según el estado
 async function getNotificationRecipients(
   status: string,
@@ -250,23 +263,20 @@ export async function notifyTicketStatusChange(data: NotificationData) {
     const notifications = await Promise.all(
       recipients.map(async (recipient) => {
         // Notificación WebSocket
-        if (process.env.ENABLE_SOCKET_NOTIFICATIONS !== 'false') {
-          const io = getIO();
-          io.to(`user-${recipient.id}`).emit('ticket-notification', {
-            userId: recipient.id,
-            ticketId,
-            ticketTitle,
-            status: newStatus,
-            statusLabel,
-            statusMessage,
-            changedBy: changedByName,
-            date,
-            comment,
-            link,
-          });
-        }
+        emitTicketNotificationSafe(recipient.id, {
+          userId: recipient.id,
+          ticketId,
+          ticketTitle,
+          status: newStatus,
+          statusLabel,
+          statusMessage,
+          changedBy: changedByName,
+          date,
+          comment,
+          link,
+        });
 
-        // Notificación Email - Funciona para TODOS los estados: OPEN, ASSIGNED, IN_PROGRESS, PENDING, RESOLVED, CLOSED, CANCELLED
+        // Notificaci??n Email - Funciona para TODOS los estados: OPEN, ASSIGNED, IN_PROGRESS, PENDING, RESOLVED, CLOSED, CANCELLED
         let emailSent = false;
         if (recipient.email && process.env.ENABLE_EMAIL_NOTIFICATIONS === 'true') {
           console.log(`[Notification] 📧 Enviando email a ${recipient.email} para ticket ${ticketId}`);
@@ -347,22 +357,19 @@ export async function notifyTicketCreated(ticket: any) {
     await Promise.all(
       recipients.map(async (recipient) => {
         // WebSocket
-        if (process.env.ENABLE_SOCKET_NOTIFICATIONS !== 'false') {
-          const io = getIO();
-          io.to(`user-${recipient.id}`).emit('ticket-notification', {
-            userId: recipient.id,
-            ticketId: ticket.id,
-            ticketTitle: ticket.title,
-            status: 'OPEN',
-            statusLabel: 'Nuevo',
-            statusMessage: '🆕 Nuevo ticket creado',
-            changedBy: ticket.requestedBy?.name || 'Sistema',
-            date,
-            link,
-          });
-        }
+        emitTicketNotificationSafe(recipient.id, {
+          userId: recipient.id,
+          ticketId: ticket.id,
+          ticketTitle: ticket.title,
+          status: 'OPEN',
+          statusLabel: 'Nuevo',
+          statusMessage: '???? Nuevo ticket creado',
+          changedBy: ticket.requestedBy?.name || 'Sistema',
+          date,
+          link,
+        });
 
-        // Email - Notificación de creación de ticket
+        // Email - Notificaci??n de creaci??n de ticket
         let emailSent = false;
         if (recipient.email && process.env.ENABLE_EMAIL_NOTIFICATIONS === 'true') {
           console.log(`[Notification] 📧 Enviando email de CREACIÓN de ticket a ${recipient.email}`);
@@ -530,21 +537,18 @@ export async function notifyCommentAdded(
     await Promise.all(
       recipients.map(async (recipient) => {
         // WebSocket
-        if (process.env.ENABLE_SOCKET_NOTIFICATIONS !== 'false') {
-          const io = getIO();
-          io.to(`user-${recipient.id}`).emit('ticket-notification', {
-            userId: recipient.id,
-            ticketId: ticket.id,
-            ticketTitle: ticket.title,
-            status: ticket.status,
-            statusLabel: ticket.status,
-            statusMessage: `💬 Nuevo comentario en ticket`,
-            changedBy: commentedBy.name,
-            date,
-            comment: commentContent,
-            link,
-          });
-        }
+        emitTicketNotificationSafe(recipient.id, {
+          userId: recipient.id,
+          ticketId: ticket.id,
+          ticketTitle: ticket.title,
+          status: ticket.status,
+          statusLabel: ticket.status,
+          statusMessage: `???? Nuevo comentario en ticket`,
+          changedBy: commentedBy.name,
+          date,
+          comment: commentContent,
+          link,
+        });
 
         // Email
         let emailSent = false;
@@ -601,4 +605,3 @@ export async function notifyCommentAdded(
     console.error('Error notifying comment addition:', error);
   }
 }
-
