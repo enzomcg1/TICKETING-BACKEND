@@ -75,6 +75,15 @@ interface EmailOptions {
   html: string;
 }
 
+interface NotificationEmailTemplateOptions {
+  title: string;
+  intro: string;
+  details?: Array<{ label: string; value: string }>;
+  actionLabel?: string;
+  actionUrl?: string;
+  footer?: string;
+}
+
 export const sendEmail = async ({ to, subject, html }: EmailOptions): Promise<boolean> => {
   try {
     if (process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'true') {
@@ -186,6 +195,75 @@ export const createEmailTemplate = (
           <a href="${safeLink}" class="button">Ver Ticket</a>
           <div class="footer">
             <p>Sistema de Gestion de Tickets - Departamento de Informatica</p>
+          </div>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+};
+
+export const createNotificationEmailTemplate = ({
+  title,
+  intro,
+  details = [],
+  actionLabel,
+  actionUrl,
+  footer,
+}: NotificationEmailTemplateOptions): string => {
+  const safeTitle = escapeHtml(title || 'Notificacion');
+  const safeIntro = escapeHtml(intro || '');
+  const safeFooter = escapeHtml(footer || 'Sistema de Gestion de Tickets - Departamento de Informatica');
+  const safeDetails = details
+    .filter((detail) => detail.label && detail.value)
+    .map((detail) => ({
+      label: escapeHtml(detail.label),
+      value: escapeHtml(detail.value),
+    }));
+  const safeActionLabel = actionLabel ? escapeHtml(actionLabel) : '';
+  const safeActionUrl = actionUrl ? escapeHtml(actionUrl) : '';
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #1f2937; background: #f3f4f6; margin: 0; padding: 24px; }
+        .container { max-width: 640px; margin: 0 auto; }
+        .card { background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08); }
+        .header { background: #1d4ed8; color: #ffffff; padding: 24px; }
+        .content { padding: 24px; }
+        .intro { margin: 0 0 20px; }
+        .details { width: 100%; border-collapse: collapse; margin: 16px 0 24px; }
+        .details td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+        .details td:first-child { width: 180px; font-weight: 700; color: #374151; }
+        .button { display: inline-block; padding: 12px 20px; background: #1d4ed8; color: #ffffff !important; text-decoration: none; border-radius: 6px; font-weight: 700; }
+        .footer { padding: 0 24px 24px; color: #6b7280; font-size: 12px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="card">
+          <div class="header">
+            <h2>${safeTitle}</h2>
+          </div>
+          <div class="content">
+            <p class="intro">${safeIntro}</p>
+            ${safeDetails.length > 0 ? `
+            <table class="details">
+              <tbody>
+                ${safeDetails.map((detail) => `
+                <tr>
+                  <td>${detail.label}</td>
+                  <td>${detail.value}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>` : ''}
+            ${safeActionLabel && safeActionUrl ? `<a href="${safeActionUrl}" class="button">${safeActionLabel}</a>` : ''}
+          </div>
+          <div class="footer">
+            <p>${safeFooter}</p>
           </div>
         </div>
       </div>

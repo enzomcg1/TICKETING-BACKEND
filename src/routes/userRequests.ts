@@ -3,6 +3,11 @@ import bcrypt from 'bcryptjs';
 import prisma from '../config/database';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 import { loggerService } from '../services/loggerService';
+import {
+  notifyUserRequestApproved,
+  notifyUserRequestCreated,
+  notifyUserRequestRejected,
+} from '../services/notificationService';
 
 const router = express.Router();
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -74,8 +79,13 @@ router.post('/', async (req, res) => {
       }
     });
 
-    // TODO: Enviar notificación a administradores (Socket.IO, Email, WhatsApp)
-    // emitNotificationToAdmins(userRequest);
+    notifyUserRequestCreated({
+      name: userRequest.name,
+      email: userRequest.email,
+      requestedRole: userRequest.requestedRole,
+      branchName: userRequest.branch?.name,
+      departmentName: userRequest.department?.name,
+    }).catch(err => console.error('Error al notificar nueva solicitud de registro:', err));
 
     res.status(201).json({
       message: 'Solicitud de registro creada exitosamente. Un administrador revisará tu solicitud.',
@@ -160,7 +170,15 @@ router.post('/:id/approve', authenticate, authorize('ADMIN'), async (req: AuthRe
     const { id } = req.params;
 
     const userRequest = await prisma.userRequest.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        department: {
+          select: { id: true, name: true, code: true }
+        },
+        branch: {
+          select: { id: true, name: true, code: true }
+        }
+      }
     });
 
     if (!userRequest) {
@@ -230,8 +248,14 @@ router.post('/:id/approve', authenticate, authorize('ADMIN'), async (req: AuthRe
       }
     ).catch(err => console.error('Error al registrar log de aprobación de solicitud:', err));
 
-    // TODO: Enviar email al nuevo usuario con credenciales
-    // sendWelcomeEmail(newUser.email, userRequest.email);
+    notifyUserRequestApproved({
+      name: newUser.name,
+      email: newUser.email,
+      requestedRole: newUser.role,
+      branchName: userRequest.branch?.name,
+      departmentName: userRequest.department?.name,
+      processedByName: user.email,
+    }).catch(err => console.error('Error al notificar aprobacion de solicitud:', err));
 
     res.json({
       message: 'Solicitud aprobada y usuario creado exitosamente',
@@ -251,7 +275,15 @@ router.post('/:id/reject', authenticate, authorize('ADMIN'), async (req: AuthReq
     const { rejectionReason } = req.body;
 
     const userRequest = await prisma.userRequest.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        department: {
+          select: { id: true, name: true, code: true }
+        },
+        branch: {
+          select: { id: true, name: true, code: true }
+        }
+      }
     });
 
     if (!userRequest) {
@@ -291,8 +323,15 @@ router.post('/:id/reject', authenticate, authorize('ADMIN'), async (req: AuthReq
       }
     ).catch(err => console.error('Error al registrar log de rechazo de solicitud:', err));
 
-    // TODO: Enviar email al solicitante informando el rechazo
-    // sendRejectionEmail(userRequest.email, rejectionReason);
+    notifyUserRequestRejected({
+      name: userRequest.name,
+      email: userRequest.email,
+      requestedRole: userRequest.requestedRole,
+      branchName: userRequest.branch?.name,
+      departmentName: userRequest.department?.name,
+      processedByName: user.email,
+      rejectionReason: rejectionReason || null,
+    }).catch(err => console.error('Error al notificar rechazo de solicitud:', err));
 
     res.json({
       message: 'Solicitud rechazada exitosamente'

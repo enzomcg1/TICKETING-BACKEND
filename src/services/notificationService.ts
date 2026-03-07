@@ -1,5 +1,5 @@
 import prisma from '../config/database';
-import { sendEmail, createEmailTemplate } from './emailService';
+import { sendEmail, createEmailTemplate, createNotificationEmailTemplate } from './emailService';
 import { getIO } from '../config/socket';
 
 interface NotificationData {
@@ -15,6 +15,36 @@ interface NotificationData {
   comment?: string;
   branchName?: string;
   departmentName?: string;
+}
+
+interface UserRequestNotificationData {
+  name: string;
+  email: string;
+  requestedRole: string;
+  branchName?: string | null;
+  departmentName?: string | null;
+  processedByName?: string;
+  rejectionReason?: string | null;
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  ADMIN: 'Administrador',
+  TECHNICIAN: 'Tecnico',
+  USER: 'Usuario',
+  SUPERVISOR: 'Supervisor',
+  AUDITOR: 'Auditor',
+};
+
+function getFrontendBaseUrl(): string {
+  return (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
+}
+
+function buildFrontendLink(path: string): string {
+  return `${getFrontendBaseUrl()}${path.startsWith('/') ? path : `/${path}`}`;
+}
+
+function getRoleLabel(role: string): string {
+  return ROLE_LABELS[role] || role;
 }
 
 function emitTicketNotificationSafe(userId: string, payload: any): void {
@@ -603,5 +633,119 @@ export async function notifyCommentAdded(
     console.log(`[Notification] Notificaciones de comentario enviadas a ${recipients.length} usuarios`);
   } catch (error) {
     console.error('Error notifying comment addition:', error);
+  }
+}
+
+export async function notifyUserRequestCreated(data: UserRequestNotificationData) {
+  try {
+    const admins = await prisma.user.findMany({
+      where: {
+        role: 'ADMIN',
+        isActive: true,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+      },
+    });
+
+    if (admins.length === 0) {
+      console.warn('[Notification] No hay administradores activos para notificar la nueva solicitud de registro');
+      return;
+    }
+
+    const actionUrl = buildFrontendLink('/user-requests');
+    const details = [
+      { label: 'Solicitante', value: data.name },
+      { label: 'Email', value: data.email },
+      { label: 'Rol solicitado', value: getRoleLabel(data.requestedRole) },
+      { label: 'Sucursal', value: data.branchName || 'No especificada' },
+      { label: 'Departamento', value: data.departmentName || 'No especificado' },
+    ];
+
+    await Promise.all(
+      admins.map(async (admin) => {
+        if (!admin.email) {
+          console.warn(`[Notification] Administrador ${admin.id} (${admin.name}) sin email para solicitud de registro`);
+          return;
+        }
+
+        const emailSent = await sendEmail({
+          to: admin.email,
+          subject: `Nueva solicitud de registro: ${data.name}`,
+          html: createNotificationEmailTemplate({
+            title: 'Nueva solicitud de registro',
+            intro: 'Se registro una nueva solicitud pendiente y requiere revision administrativa.',
+            details,
+            actionLabel: 'Revisar solicitudes',
+            actionUrl,
+          }),
+        });
+
+        if (!emailSent) {
+          console.warn(`[Notification] No se pudo enviar email de nueva solicitud a ${admin.email}`);
+        }
+      })
+    );
+  } catch (error) {
+    console.error('[Notification] Error notificando nueva solicitud de registro:', error);
+  }
+}
+
+export async function notifyUserRequestApproved(data: UserRequestNotificationData) {
+  try {
+    const emailSent = await sendEmail({
+      to: data.email,
+      subject: 'Tu solicitud de registro fue aprobada',
+      html: createNotificationEmailTemplate({
+        title: 'Solicitud aprobada',
+        intro: 'Tu cuenta fue aprobada y ya puedes iniciar sesion en el sistema.',
+        details: [
+          { label: 'Nombre', value: data.name },
+          { label: 'Email', value: data.email },
+          { label: 'Rol asignado', value: getRoleLabel(data.requestedRole) },
+          { label: 'Sucursal', value: data.branchName || 'No especificada' },
+          { label: 'Departamento', value: data.departmentName || 'No especificado' },
+          { label: 'Aprobado por', value: data.processedByName || 'Administracion' },
+        ],
+        actionLabel: 'Ir al login',
+        actionUrl: buildFrontendLink('/login'),
+      }),
+    });
+
+    if (!emailSent) {
+      console.warn(`[Notification] No se pudo enviar email de aprobacion a ${data.email}`);
+    }
+  } catch (error) {
+    console.error('[Notification] Error notificando aprobacion de solicitud:', error);
+  }
+}
+
+export async function notifyUserRequestRejected(data: UserRequestNotificationData) {
+  try {
+    const emailSent = await sendEmail({
+      to: data.email,
+      subject: 'Tu solicitud de registro fue rechazada',
+      html: createNotificationEmailTemplate({
+        title: 'Solicitud rechazada',
+        intro: 'La solicitud de registro no fue aprobada en esta revision.',
+        details: [
+          { label: 'Nombre', value: data.name },
+          { label: 'Email', value: data.email },
+          { label: 'Rol solicitado', value: getRoleLabel(data.requestedRole) },
+          { label: 'Revisado por', value: data.processedByName || 'Administracion' },
+          { label: 'Motivo', value: data.rejectionReason || 'No se especifico un motivo' },
+        ],
+        actionLabel: 'Volver a solicitar registro',
+        actionUrl: buildFrontendLink('/request-register'),
+      }),
+    });
+
+    if (!emailSent) {
+      console.warn(`[Notification] No se pudo enviar email de rechazo a ${data.email}`);
+    }
+  } catch (error) {
+    console.error('[Notification] Error notificando rechazo de solicitud:', error);
   }
 }
