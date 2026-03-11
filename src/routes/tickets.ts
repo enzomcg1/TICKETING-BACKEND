@@ -1649,7 +1649,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 
     // Notificar creación del ticket
     if (fullTicket) {
-      notifyTicketCreated(fullTicket).catch(err => {
+      await notifyTicketCreated(fullTicket).catch(err => {
         console.error('Error notifying ticket creation:', err);
       });
     }
@@ -1821,7 +1821,7 @@ router.put('/:id', authenticate, async (req: AuthRequest, res) => {
         select: { name: true }
       });
       
-      notifyTicketStatusChange({
+      await notifyTicketStatusChange({
         ticketId: updatedTicket.id,
         ticketTitle: updatedTicket.title,
         oldStatus: ticket.status,
@@ -1916,10 +1916,10 @@ router.post('/:id/comments', authenticate, async (req: AuthRequest, res) => {
     });
     
     // Notificar a los involucrados sobre el nuevo comentario
-    notifyCommentAdded(
-      req.params.id,
-      comment.id,
-      content,
+      await notifyCommentAdded(
+        req.params.id,
+        comment.id,
+        content,
       {
         id: user.id,
         name: commentUser?.name || comment.user.name,
@@ -2114,4 +2114,3 @@ router.get('/:id/available-statuses', authenticate, async (req: AuthRequest, res
 });
 
 export default router;
-

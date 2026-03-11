@@ -79,13 +79,13 @@ router.post('/', async (req, res) => {
       }
     });
 
-    notifyUserRequestCreated({
+    await notifyUserRequestCreated({
       name: userRequest.name,
       email: userRequest.email,
       requestedRole: userRequest.requestedRole,
       branchName: userRequest.branch?.name,
       departmentName: userRequest.department?.name,
-    }).catch(err => console.error('Error al notificar nueva solicitud de registro:', err));
+    });
 
     res.status(201).json({
       message: 'Solicitud de registro creada exitosamente. Un administrador revisará tu solicitud.',
@@ -248,14 +248,14 @@ router.post('/:id/approve', authenticate, authorize('ADMIN'), async (req: AuthRe
       }
     ).catch(err => console.error('Error al registrar log de aprobación de solicitud:', err));
 
-    notifyUserRequestApproved({
+    await notifyUserRequestApproved({
       name: newUser.name,
       email: newUser.email,
       requestedRole: newUser.role,
       branchName: userRequest.branch?.name,
       departmentName: userRequest.department?.name,
       processedByName: user.email,
-    }).catch(err => console.error('Error al notificar aprobacion de solicitud:', err));
+    });
 
     res.json({
       message: 'Solicitud aprobada y usuario creado exitosamente',
@@ -323,7 +323,7 @@ router.post('/:id/reject', authenticate, authorize('ADMIN'), async (req: AuthReq
       }
     ).catch(err => console.error('Error al registrar log de rechazo de solicitud:', err));
 
-    notifyUserRequestRejected({
+    await notifyUserRequestRejected({
       name: userRequest.name,
       email: userRequest.email,
       requestedRole: userRequest.requestedRole,
@@ -331,7 +331,7 @@ router.post('/:id/reject', authenticate, authorize('ADMIN'), async (req: AuthReq
       departmentName: userRequest.department?.name,
       processedByName: user.email,
       rejectionReason: rejectionReason || null,
-    }).catch(err => console.error('Error al notificar rechazo de solicitud:', err));
+    });
 
     res.json({
       message: 'Solicitud rechazada exitosamente'

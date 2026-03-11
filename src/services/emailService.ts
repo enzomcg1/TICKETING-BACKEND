@@ -67,7 +67,20 @@ const createTransporter = () => {
   });
 };
 
-const transporter = createTransporter();
+let transporter: nodemailer.Transporter | null | undefined;
+let transporterVerified = false;
+
+function isEmailEnabled(): boolean {
+  const rawValue = (process.env.ENABLE_EMAIL_NOTIFICATIONS || '').trim().toLowerCase();
+  return ['true', '1', 'yes', 'on'].includes(rawValue);
+}
+
+function getTransporter(): nodemailer.Transporter | null {
+  if (transporter === undefined) {
+    transporter = createTransporter();
+  }
+  return transporter;
+}
 
 interface EmailOptions {
   to: string;
@@ -86,12 +99,14 @@ interface NotificationEmailTemplateOptions {
 
 export const sendEmail = async ({ to, subject, html }: EmailOptions): Promise<boolean> => {
   try {
-    if (process.env.ENABLE_EMAIL_NOTIFICATIONS !== 'true') {
+    if (!isEmailEnabled()) {
+      console.warn('[Email] Notificaciones de email deshabilitadas por configuracion.');
       return false;
     }
 
     const emailUser = process.env.EMAIL_USER;
-    if (!emailUser || !transporter) {
+    const activeTransporter = getTransporter();
+    if (!emailUser || !activeTransporter) {
       console.error('[Email] EMAIL_USER/EMAIL_PASSWORD no configurados.');
       return false;
     }
@@ -107,10 +122,16 @@ export const sendEmail = async ({ to, subject, html }: EmailOptions): Promise<bo
       html,
     };
 
-    await transporter.sendMail(mailOptions);
+    if (!transporterVerified) {
+      await activeTransporter.verify();
+      transporterVerified = true;
+    }
+
+    await activeTransporter.sendMail(mailOptions);
     return true;
   } catch (error: any) {
     console.error('[Email] Error al enviar email:', error?.message || error);
+    transporterVerified = false;
     return false;
   }
 };
