@@ -12,7 +12,7 @@ import notificationRoutes from './routes/notifications';
 import logRoutes from './routes/logs';
 import attachmentRoutes from './routes/attachments';
 import { initializeSocket } from './config/socket';
-import { getAllowedOrigins, isOriginAllowed, isProduction } from './config/security';
+import { hasConfiguredAllowedOrigins, isOriginAllowed, isProduction } from './config/security';
 import { securityHeaders } from './middleware/security';
 import path from 'path';
 
@@ -21,10 +21,8 @@ dotenv.config();
 const app = express();
 const httpServer = http.createServer(app);
 const PORT = parseInt(process.env.PORT || '3000', 10);
-const allowedOrigins = getAllowedOrigins();
-
-if (isProduction() && allowedOrigins.length === 0) {
-  throw new Error('FRONTEND_URL es obligatorio en produccion');
+if (isProduction() && !hasConfiguredAllowedOrigins()) {
+  throw new Error('FRONTEND_URL o FRONTEND_ORIGIN_PATTERNS es obligatorio en produccion');
 }
 
 app.disable('x-powered-by');

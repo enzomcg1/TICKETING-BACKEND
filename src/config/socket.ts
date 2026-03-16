@@ -1,14 +1,12 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { Server as HTTPServer } from 'http';
-import { getAllowedOrigins, isOriginAllowed, isProduction } from './security';
+import { hasConfiguredAllowedOrigins, isOriginAllowed, isProduction } from './security';
 
 let io: SocketIOServer | null = null;
 
 export const initializeSocket = (httpServer: HTTPServer) => {
-  const allowedOrigins = getAllowedOrigins();
-
-  if (isProduction() && allowedOrigins.length === 0) {
-    throw new Error('FRONTEND_URL es obligatorio en produccion para Socket.IO');
+  if (isProduction() && !hasConfiguredAllowedOrigins()) {
+    throw new Error('FRONTEND_URL o FRONTEND_ORIGIN_PATTERNS es obligatorio en produccion para Socket.IO');
   }
 
   io = new SocketIOServer(httpServer, {
