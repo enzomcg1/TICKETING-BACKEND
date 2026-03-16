@@ -9,70 +9,40 @@ async function testEmail() {
   const emailUser = process.env.EMAIL_USER;
   const emailPass = process.env.EMAIL_PASSWORD;
   const testEmailAddress = process.env.TEST_EMAIL;
+  const smtpHost = process.env.SMTP_HOST;
+  const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
+  const smtpSecure = (process.env.SMTP_SECURE || '').trim().toLowerCase() === 'true';
+  const fromName = process.env.SMTP_FROM_NAME || 'Sistema de Tickets';
+  const fromEmail = process.env.SMTP_FROM_EMAIL || emailUser;
 
-  if (!emailUser || !emailPass || !testEmailAddress) {
-    console.error('Faltan variables requeridas: EMAIL_USER, EMAIL_PASSWORD y TEST_EMAIL');
+  if (!smtpHost || !emailUser || !emailPass || !testEmailAddress || !fromEmail) {
+    console.error('Faltan variables requeridas: SMTP_HOST, EMAIL_USER, EMAIL_PASSWORD, SMTP_FROM_EMAIL y TEST_EMAIL');
     process.exit(1);
   }
 
-  const isGmail = emailUser.includes('@gmail.com');
-  const isOutlook = emailUser.includes('@outlook.com') || emailUser.includes('@hotmail.com');
+  try {
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpSecure,
+      auth: { user: emailUser, pass: emailPass },
+    });
 
-  const configs = [] as Array<{ name: string; config: any }>;
+    await transporter.verify();
 
-  if (isGmail) {
-    configs.push({
-      name: 'Gmail (Service)',
-      config: {
-        service: 'gmail',
-        auth: { user: emailUser, pass: emailPass },
-      },
+    const info = await transporter.sendMail({
+      from: `"${fromName}" <${fromEmail}>`,
+      to: testEmailAddress,
+      subject: 'Prueba de Email - Sistema de Tickets',
+      html: `<h2>Email de Prueba</h2><p>Servidor SMTP: ${smtpHost}:${smtpPort}</p><p>Fecha: ${new Date().toISOString()}</p>`,
     });
-  } else if (isOutlook) {
-    configs.push({
-      name: 'Outlook - Puerto 587 (STARTTLS)',
-      config: {
-        host: 'smtp-mail.outlook.com',
-        port: 587,
-        secure: false,
-        auth: { user: emailUser, pass: emailPass },
-        tls: { ciphers: 'SSLv3', rejectUnauthorized: false },
-        requireTLS: true,
-      },
-    });
-  } else {
-    configs.push({
-      name: 'SMTP Generico',
-      config: {
-        host: process.env.SMTP_HOST || 'smtp-mail.outlook.com',
-        port: parseInt(process.env.SMTP_PORT || '587', 10),
-        secure: process.env.SMTP_SECURE === 'true',
-        auth: { user: emailUser, pass: emailPass },
-        tls: { rejectUnauthorized: false },
-      },
-    });
+
+    console.log(`Email enviado exitosamente. MessageId: ${info.messageId}`);
+    process.exit(0);
+  } catch (error: any) {
+    console.error('Error SMTP:', error?.message || error);
+    process.exit(1);
   }
-
-  for (const { name, config } of configs) {
-    try {
-      const transporter = nodemailer.createTransport(config);
-      await transporter.verify();
-
-      const info = await transporter.sendMail({
-        from: `"Sistema de Tickets" <${emailUser}>`,
-        to: testEmailAddress,
-        subject: `Prueba de Email - ${name}`,
-        html: `<h2>Email de Prueba</h2><p>Configuracion: ${name}</p><p>Fecha: ${new Date().toISOString()}</p>`,
-      });
-
-      console.log(`Email enviado exitosamente con ${name}. MessageId: ${info.messageId}`);
-      process.exit(0);
-    } catch (error: any) {
-      console.error(`Error con ${name}:`, error?.message || error);
-    }
-  }
-
-  process.exit(1);
 }
 
 testEmail();

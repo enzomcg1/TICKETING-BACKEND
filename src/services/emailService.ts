@@ -3,6 +3,11 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+function isEnabled(value: string | undefined): boolean {
+  const normalized = (value || '').trim().toLowerCase();
+  return ['true', '1', 'yes', 'on'].includes(normalized);
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -12,57 +17,44 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-const createTransporter = () => {
-  const emailUser = process.env.EMAIL_USER;
-  const emailPass = process.env.EMAIL_PASSWORD;
+function getEmailConfig() {
+  const host = (process.env.SMTP_HOST || '').trim();
+  const port = parseInt(process.env.SMTP_PORT || '587', 10);
+  const secure = isEnabled(process.env.SMTP_SECURE);
+  const user = (process.env.EMAIL_USER || '').trim();
+  const pass = process.env.EMAIL_PASSWORD || '';
+  const fromName = (process.env.SMTP_FROM_NAME || 'Sistema de Tickets').trim();
+  const fromEmail = (process.env.SMTP_FROM_EMAIL || user).trim();
 
-  if (!emailUser || !emailPass) {
+  if (!host || !user || !pass || !fromEmail) {
     return null;
   }
 
-  const isGmail = emailUser.includes('@gmail.com');
-  const isOutlook = emailUser.includes('@outlook.com') || emailUser.includes('@hotmail.com') || emailUser.includes('@live.com');
+  return {
+    host,
+    port,
+    secure,
+    user,
+    pass,
+    fromName,
+    fromEmail,
+  };
+}
 
-  if (isGmail) {
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: emailUser,
-        pass: emailPass,
-      },
-    });
-  }
+const createTransporter = () => {
+  const config = getEmailConfig();
 
-  if (isOutlook) {
-    return nodemailer.createTransport({
-      host: 'smtp-mail.outlook.com',
-      port: 587,
-      secure: false,
-      auth: {
-        user: emailUser,
-        pass: emailPass,
-      },
-      tls: {
-        ciphers: 'SSLv3',
-        rejectUnauthorized: false,
-      },
-      requireTLS: true,
-      connectionTimeout: 30000,
-      greetingTimeout: 30000,
-      socketTimeout: 30000,
-    });
+  if (!config) {
+    return null;
   }
 
   return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp-mail.outlook.com',
-    port: parseInt(process.env.SMTP_PORT || '587', 10),
-    secure: process.env.SMTP_SECURE === 'true',
+    host: config.host,
+    port: config.port,
+    secure: config.secure,
     auth: {
-      user: emailUser,
-      pass: emailPass,
-    },
-    tls: {
-      rejectUnauthorized: false,
+      user: config.user,
+      pass: config.pass,
     },
   });
 };
@@ -70,9 +62,8 @@ const createTransporter = () => {
 let transporter: nodemailer.Transporter | null | undefined;
 let transporterVerified = false;
 
-function isEmailEnabled(): boolean {
-  const rawValue = (process.env.ENABLE_EMAIL_NOTIFICATIONS || '').trim().toLowerCase();
-  return ['true', '1', 'yes', 'on'].includes(rawValue);
+export function isEmailEnabled(): boolean {
+  return isEnabled(process.env.ENABLE_EMAIL_NOTIFICATIONS);
 }
 
 function getTransporter(): nodemailer.Transporter | null {
@@ -104,10 +95,10 @@ export const sendEmail = async ({ to, subject, html }: EmailOptions): Promise<bo
       return false;
     }
 
-    const emailUser = process.env.EMAIL_USER;
+    const emailConfig = getEmailConfig();
     const activeTransporter = getTransporter();
-    if (!emailUser || !activeTransporter) {
-      console.error('[Email] EMAIL_USER/EMAIL_PASSWORD no configurados.');
+    if (!emailConfig || !activeTransporter) {
+      console.error('[Email] Configuracion SMTP incompleta. Requiere SMTP_HOST, SMTP_PORT, EMAIL_USER y EMAIL_PASSWORD.');
       return false;
     }
 
@@ -116,7 +107,7 @@ export const sendEmail = async ({ to, subject, html }: EmailOptions): Promise<bo
     }
 
     const mailOptions = {
-      from: `"Sistema de Tickets" <${emailUser}>`,
+      from: `"${emailConfig.fromName}" <${emailConfig.fromEmail}>`,
       to,
       subject,
       html,
