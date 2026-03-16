@@ -10,6 +10,7 @@ import fs from 'fs/promises';
 const router = express.Router();
 const storageService = getStorageService();
 const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+const isLocalStorage = (process.env.STORAGE_TYPE || 'local').trim().toLowerCase() === 'local';
 
 function resolveAttachmentPath(relativePath: string): string {
   const normalizedRelativePath = relativePath.replace(/^([/\\])+/, '');
@@ -238,6 +239,10 @@ router.get('/:id/download', authenticate, async (req: AuthRequest, res) => {
 
     if (!canView) {
       return res.status(403).json({ error: 'No tienes permisos para descargar este archivo' });
+    }
+
+    if (!isLocalStorage) {
+      return res.redirect(302, attachment.fileUrl);
     }
 
     let filePath: string;
