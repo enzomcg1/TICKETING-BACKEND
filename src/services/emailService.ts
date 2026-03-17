@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import SMTPTransport from 'nodemailer/lib/smtp-transport';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -48,15 +49,22 @@ const createTransporter = () => {
     return null;
   }
 
-  return nodemailer.createTransport({
+  const transportConfig: SMTPTransport.Options & { family: 4 } = {
     host: config.host,
     port: config.port,
     secure: config.secure,
+    requireTLS: !config.secure,
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
+    family: 4,
     auth: {
       user: config.user,
       pass: config.pass,
     },
-  });
+  };
+
+  return nodemailer.createTransport(transportConfig);
 };
 
 let transporter: nodemailer.Transporter | null | undefined;

@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import SMTPTransport from 'nodemailer/lib/smtp-transport';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -21,12 +22,19 @@ async function testEmail() {
   }
 
   try {
-    const transporter = nodemailer.createTransport({
+    const transportConfig: SMTPTransport.Options & { family: 4 } = {
       host: smtpHost,
       port: smtpPort,
       secure: smtpSecure,
+      requireTLS: !smtpSecure,
+      connectionTimeout: 30000,
+      greetingTimeout: 30000,
+      socketTimeout: 30000,
+      family: 4,
       auth: { user: emailUser, pass: emailPass },
-    });
+    };
+
+    const transporter = nodemailer.createTransport(transportConfig);
 
     await transporter.verify();
 
