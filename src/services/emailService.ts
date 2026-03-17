@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import SMTPTransport from 'nodemailer/lib/smtp-transport';
+import { Resend } from 'resend';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -42,6 +43,22 @@ function getEmailConfig() {
   };
 }
 
+function getResendConfig() {
+  const apiKey = (process.env.RESEND_API_KEY || '').trim();
+  const fromEmail = (process.env.RESEND_FROM_EMAIL || process.env.SMTP_FROM_EMAIL || 'onboarding@resend.dev').trim();
+  const fromName = (process.env.RESEND_FROM_NAME || process.env.SMTP_FROM_NAME || 'Sistema de Tickets').trim();
+
+  if (!apiKey) {
+    return null;
+  }
+
+  return {
+    apiKey,
+    fromEmail,
+    fromName,
+  };
+}
+
 const createTransporter = () => {
   const config = getEmailConfig();
 
@@ -69,6 +86,7 @@ const createTransporter = () => {
 
 let transporter: nodemailer.Transporter | null | undefined;
 let transporterVerified = false;
+let resendClient: Resend | null | undefined;
 
 export function isEmailEnabled(): boolean {
   return isEnabled(process.env.ENABLE_EMAIL_NOTIFICATIONS);
@@ -79,6 +97,19 @@ function getTransporter(): nodemailer.Transporter | null {
     transporter = createTransporter();
   }
   return transporter;
+}
+
+function getResendClient(): Resend | null {
+  const resendConfig = getResendConfig();
+  if (!resendConfig) {
+    return null;
+  }
+
+  if (resendClient === undefined) {
+    resendClient = new Resend(resendConfig.apiKey);
+  }
+
+  return resendClient;
 }
 
 interface EmailOptions {
@@ -103,14 +134,31 @@ export const sendEmail = async ({ to, subject, html }: EmailOptions): Promise<bo
       return false;
     }
 
-    const emailConfig = getEmailConfig();
-    const activeTransporter = getTransporter();
-    if (!emailConfig || !activeTransporter) {
-      console.error('[Email] Configuracion SMTP incompleta. Requiere SMTP_HOST, SMTP_PORT, EMAIL_USER y EMAIL_PASSWORD.');
+    if (!to || !to.includes('@')) {
       return false;
     }
 
-    if (!to || !to.includes('@')) {
+    const resendConfig = getResendConfig();
+    const resend = getResendClient();
+    if (resendConfig && resend) {
+      const from = resendConfig.fromName
+        ? `${resendConfig.fromName} <${resendConfig.fromEmail}>`
+        : resendConfig.fromEmail;
+
+      await resend.emails.send({
+        from,
+        to: [to],
+        subject,
+        html,
+      });
+
+      return true;
+    }
+
+    const emailConfig = getEmailConfig();
+    const activeTransporter = getTransporter();
+    if (!emailConfig || !activeTransporter) {
+      console.error('[Email] Configuracion incompleta. Configure Resend o SMTP para enviar emails.');
       return false;
     }
 
